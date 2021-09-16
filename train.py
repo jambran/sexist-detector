@@ -175,11 +175,6 @@ if __name__ == "__main__":
     # Saves the model to s3
     trainer.save_model(args.model_dir)
 
-    # write incorrectly labeled instances to a wandb table
-    # Create a W&B Table
-    my_table = wandb.Table(columns=["sentence", "label", "prediction"])
-
-    # write incorrectly labeled instances to a wandb table
     # Create a W&B Table
     my_table = wandb.Table(columns=["sentence", "label", "prediction"])
 
