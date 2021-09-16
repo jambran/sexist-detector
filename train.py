@@ -5,7 +5,6 @@ from pathlib import Path
 
 import datasets
 import torch
-import wandb
 from datasets import (
     ClassLabel
 )
@@ -13,6 +12,7 @@ from sklearn.metrics import (
     accuracy_score,
     precision_recall_fscore_support
 )
+from tqdm import tqdm
 from transformers import (
     AutoModelForSequenceClassification,
     Trainer,
@@ -20,6 +20,8 @@ from transformers import (
     AutoTokenizer,
     default_data_collator,
 )
+
+import wandb
 
 if __name__ == "__main__":
 
@@ -71,6 +73,7 @@ if __name__ == "__main__":
                                                 'test': str(test_file),
                                                 })
 
+
     # preprocess function, tokenizes text
     def preprocess_function(examples):
         to_ret = tokenizer(examples["Sentences"],
@@ -84,7 +87,6 @@ if __name__ == "__main__":
         lambda examples: {'label': examples['Label']},
         batched=True,
     )
-
 
     # preprocess dataset
     dataset = dataset.map(
@@ -177,16 +179,20 @@ if __name__ == "__main__":
     # Create a W&B Table
     my_table = wandb.Table(columns=["sentence", "label", "prediction"])
 
+    # write incorrectly labeled instances to a wandb table
+    # Create a W&B Table
+    my_table = wandb.Table(columns=["sentence", "label", "prediction"])
+
     # Get your image data and make predictions
     for split in ('train', 'val'):
         this_dataset = dataset[split]
-        loader = torch.utils.data.DataLoader(this_dataset, batch_size=args.batch_size)
+        loader = torch.utils.data.DataLoader(this_dataset, batch_size=args.train_batch_size)
 
-        for batch in loader:
-            input_ids = torch.tensor(batch['input_ids'], device=trainer.model.device)
-            attention_mask = torch.tensor(batch['attention_mask'], device=trainer.model.device)
-            token_type_ids = torch.tensor(batch['token_type_ids'], device=trainer.model.device)
-            labels = torch.tensor(batch['label'])
+        for batch in tqdm(loader):
+            input_ids = torch.stack(batch['input_ids'], dim=-1).to(trainer.model.device)
+            attention_mask = torch.stack(batch['attention_mask'], dim=-1).to(trainer.model.device)
+            token_type_ids = torch.stack(batch['token_type_ids'], dim=-1).to(trainer.model.device)
+            labels = batch['label'].to(trainer.model.device)
             outputs = trainer.model(input_ids, attention_mask, token_type_ids)
             logits = outputs['logits']
             predictions = logits.argmax(1)
@@ -198,9 +204,12 @@ if __name__ == "__main__":
                 instance_input_ids = instance_input_ids[torch.nonzero(instance_input_ids)].squeeze()
                 tokens = tokenizer.convert_ids_to_tokens(instance_input_ids)
                 sentence = tokenizer.convert_tokens_to_string(tokens)
+                class_actual = class_label.int2str(labels[idx].item())
+                class_predicted = class_label.int2str(pred.item())
                 my_table.add_data(sentence,
-                                  class_label.int2str(labels[idx].item()),
-                                  class_label.int2str(pred.item()))
+                                  class_actual,
+                                  class_predicted)
+            torch.cuda.empty_cache()  # we get cuda memory errors without this...
 
         # Log your Table to W&B
         wandb.log({f"{split}/predictions": my_table})
